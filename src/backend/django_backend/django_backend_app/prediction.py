@@ -1,26 +1,62 @@
+from django.http import HttpResponse
 from transformers import pipeline, AutoModelForSeq2SeqLM, AutoTokenizer
 from rest_framework import status
 import torch
+import tqdm
+
 
 class Prediction:
+    model_name = "facebook/m2m100_418M"
+    device = 0 if torch.cuda.is_available() else -1
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    pipe = pipeline("translation", model=model, tokenizer=tokenizer, device=device)
+
     def __init__(self):
-        model_name = "facebook/m2m100_418M"
-        device = 0 if torch.cuda.is_available() else -1  # Use GPU if available, otherwise use CPU
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.pipe = pipeline("translation", model=self.model, tokenizer=self.tokenizer, device=device)
+        self.types_files = ["srt", "vtt", "cap", "scc", "ttml"]
+        self.src_lang = "en"
+        self.tgt_lang = "pt"
 
     def predict(self, request):
-        return_dict = dict()
         try:
-            input_text = request.data["input_text"]
-            src_lang = "en"  # Replace with source language code
-            tgt_lang = "fr"  # Replace with target language code
-            result = self.pipe(input_text, src_lang=src_lang, tgt_lang=tgt_lang)
-            return_dict["prediction"] = result[0]["translation_text"]
-            return_dict["status"] = status.HTTP_200_OK
-        except Exception as e:
-            return_dict["prediction"] = str(e)
-            return_dict["status"] = status.HTTP_400_BAD_REQUEST
+            file = request.FILES.get("file")
+            self.src_lang = request.data.get("src_lang", "en")
+            self.tgt_lang = request.data.get("tgt_lang", "pt")
+            new_file = self.read_translate_srt(file)
+            new_file = "\n".join(new_file)
 
-        return return_dict
+            response = HttpResponse(new_file, content_type="text/plain; charset=utf-8")
+            response["Content-Disposition"] = (
+                "attachment; filename=legendas_traduzidas.srt"
+            )
+            return response
+
+        except Exception as e:
+            return HttpResponse(str(e), status=status.HTTP_400_BAD_REQUEST)
+
+    def translate(self, input_text):
+        result = self.pipe(
+            input_text, src_lang=self.src_lang, tgt_lang=self.tgt_lang, batch_size=8
+        )
+        return [res["translation_text"] for res in result]
+
+    def read_translate_srt(self, file):
+        lines = file.readlines()
+        new_lines = []
+        print("iniciando tradução")
+        batch = []
+        for line in tqdm.tqdm(lines):
+            line = line.decode("utf-8").strip()
+
+            if line.isdigit() or "-->" in line or not line:
+                if batch:
+                    new_lines.extend(self.translate(batch))
+                    batch = []
+                new_lines.append(line)
+            else:
+                batch.append(line)
+
+        if batch:
+            new_lines.extend(self.translate(batch))
+
+        return new_lines
