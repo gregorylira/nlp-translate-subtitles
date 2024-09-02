@@ -14,3 +14,12 @@ class PredNlpModel(APIView):
             return response
 
         return Response(response["prediction"], status=response["status"])
+
+    def get(self, request):
+        prediction = Prediction()
+        response = prediction.get_subtitle(request)
+
+        if isinstance(response, HttpResponse):
+            return response
+
+        return Response(response["subtitle"], status=response["status"])

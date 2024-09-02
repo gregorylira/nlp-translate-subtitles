@@ -3,6 +3,9 @@ from transformers import pipeline, AutoModelForSeq2SeqLM, AutoTokenizer
 from rest_framework import status
 import torch
 import tqdm
+import subprocess as sp
+import tempfile
+import json
 
 
 class Prediction:
@@ -34,6 +37,34 @@ class Prediction:
         except Exception as e:
             return HttpResponse(str(e), status=status.HTTP_400_BAD_REQUEST)
 
+    def get_subtitle(self, request):
+        try:
+            video = request.FILES.get("video")
+            video_path = tempfile.NamedTemporaryFile(delete=False)
+            video_path.write(video.read())
+            video_path.close()
+
+            command = [
+                "ffmpeg",
+                "-i",
+                video_path.name,
+                "-map",
+                "s:0",
+                "-f",
+                "srt",
+                "-",
+            ]
+            out = sp.run(
+                command, stdout=sp.PIPE, stderr=sp.PIPE, universal_newlines=True
+            )
+            subtitle = out.stdout
+
+            response = HttpResponse(subtitle, content_type="text/plain; charset=utf-8")
+            response["Content-Disposition"] = "attachment; filename=legendas.srt"
+
+        except Exception as e:
+            return HttpResponse(str(e), status=status.HTTP_400_BAD_REQUEST)
+
     def translate(self, input_text):
         result = self.pipe(
             input_text, src_lang=self.src_lang, tgt_lang=self.tgt_lang, batch_size=8
@@ -43,7 +74,6 @@ class Prediction:
     def read_translate_srt(self, file):
         lines = file.readlines()
         new_lines = []
-        print("iniciando tradução")
         batch = []
         for line in tqdm.tqdm(lines):
             line = line.decode("utf-8").strip()
