@@ -22,7 +22,13 @@ class Prediction:
 
     def predict(self, request):
         try:
-            file = request.FILES.get("file")
+            if "file" in request.FILES:
+                file = request.FILES.get("file")
+            elif "video" in request.FILES:
+                response = self.get_subtitle(request)
+                if isinstance(response, HttpResponse):
+                    return response
+                file = response["subtitle"]
             self.src_lang = request.data.get("src_lang", "en")
             self.tgt_lang = request.data.get("tgt_lang", "pt")
             new_file = self.read_translate_srt(file)
@@ -59,8 +65,7 @@ class Prediction:
             )
             subtitle = out.stdout
 
-            response = HttpResponse(subtitle, content_type="text/plain; charset=utf-8")
-            response["Content-Disposition"] = "attachment; filename=legendas.srt"
+            return {"subtitle": subtitle}
 
         except Exception as e:
             return HttpResponse(str(e), status=status.HTTP_400_BAD_REQUEST)
